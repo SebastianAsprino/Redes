@@ -1,105 +1,76 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onDestroy } from 'svelte';
   import Chart from 'chart.js/auto';
+  import { promedioTeorico, simularSaltos } from '$lib/simulacion.js';
 
-  let nodos = [10, 100, 1000];
-  let experimentos = 10000;
+  const nodos = [10, 100, 1000];
+  const EXPERIMENTOS_POR_DEFECTO = 10000;
+
+  let experimentos = $state(EXPERIMENTOS_POR_DEFECTO);
+  let resultadosFinales = $state([]);
+  /** @type {HTMLCanvasElement[]} */
+  const canvases = $state([]);
+  /** @type {Chart[]} */
   let charts = [];
-  let resultadosFinales = [];
 
-  function promedioTeorico(n) {
-    return (n + 1) / 3;
+  function destruirGraficos() {
+    charts.forEach((chart) => chart.destroy());
+    charts = [];
   }
 
-  function simularSaltos(n, numExperimentos) {
-    let totalSaltos = 0;
-    let promedios = [];
-    for (let i = 1; i <= numExperimentos; i++) {
-      let a = Math.floor(Math.random() * n) + 1;
-      let b = Math.floor(Math.random() * n) + 1;
-      while (a === b) {
-        b = Math.floor(Math.random() * n) + 1;
-      }
-      let saltos = Math.abs(a - b);
-      totalSaltos += saltos;
-      let promedioActual = totalSaltos / i;
-      promedios.push(promedioActual);
-    }
-    return promedios;
+  // Configuración de un gráfico: promedio simulado contra el valor teórico
+  function configuracionGrafico(n, simulados, total) {
+    return {
+      type: 'line',
+      data: {
+        labels: Array.from({ length: total }, (_, i) => i + 1),
+        datasets: [
+          {
+            label: 'Simulación',
+            data: simulados,
+            borderColor: 'green',
+            borderWidth: 1,
+            fill: false,
+            pointRadius: 0,
+          },
+          {
+            label: 'Teoría',
+            data: Array(total).fill(promedioTeorico(n)),
+            borderColor: 'blue',
+            borderWidth: 1,
+            fill: false,
+            pointRadius: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'top' },
+          title: { display: true, text: `Red de ${n} nodos` },
+        },
+        scales: {
+          x: { title: { display: true, text: 'Número de experimentos' } },
+          y: { title: { display: true, text: 'Saltos promedio' } },
+        },
+      },
+    };
   }
 
   function generarGraficos() {
-    charts.forEach(chart => chart.destroy());
-    charts = [];
-    resultadosFinales = [];
-    let resultados = {};
-    nodos.forEach(n => {
-      resultados[n] = simularSaltos(n, experimentos);
-    });
-    nodos.forEach(n => {
-      let promedioSimulado = resultados[n][experimentos - 1];
-      resultadosFinales.push({ nodos: n, promedio: promedioSimulado });
-    });
+    // un input vacío, negativo o con decimales no puede romper la simulación
+    const total = Math.max(1, Math.floor(Number(experimentos)) || 0);
+    experimentos = total;
 
-    // Crear gráficos
-    nodos.forEach((n, index) => {
-      let ctx = document.getElementById(`chart-${index}`).getContext('2d');
-      let teoria = promedioTeorico(n);
+    destruirGraficos();
+    const resultados = nodos.map((n) => simularSaltos(n, total));
+    resultadosFinales = nodos.map((n, i) => ({ nodos: n, promedio: resultados[i][total - 1] }));
 
-      let chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels: Array.from({ length: experimentos }, (_, i) => i + 1),
-          datasets: [
-            {
-              label: 'Simulación',
-              data: resultados[n],
-              borderColor: 'green',
-              borderWidth: 1,
-              fill: false,
-              pointRadius: 0,
-            },
-            {
-              label: 'Teoría',
-              data: Array(experimentos).fill(teoria),
-              borderColor: 'blue',
-              borderWidth: 1,
-              fill: false,
-              pointRadius: 0,
-            },
-          ],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              position: 'top',
-            },
-            title: {
-              display: true,
-              text: `Red de ${n} nodos`,
-            },
-          },
-          scales: {
-            x: {
-              title: {
-                display: true,
-                text: 'Número de experimentos',
-              },
-            },
-            y: {
-              title: {
-                display: true,
-                text: 'Saltos promedio',
-              },
-            },
-          },
-        },
-      });
-      charts.push(chart);
-    });
+    charts = nodos.map((n, i) => new Chart(canvases[i], configuracionGrafico(n, resultados[i], total)));
   }
+
+  onDestroy(destruirGraficos);
 </script>
 
 <div class="container mx-auto p-6 max-w-7xl">
@@ -119,10 +90,7 @@
     </div>
   </div>
   <div class="flex justify-center mb-6">
-    <button
-      class="btn btn-primary"
-      on:click={generarGraficos}
-    >
+    <button class="btn btn-primary" onclick={generarGraficos}>
       Generar Simulacion
     </button>
   </div>
@@ -130,7 +98,7 @@
   {#if resultadosFinales.length > 0}
     <div class="bg-base-200 p-4 rounded-lg shadow-md mb-6">
       <h2 class="text-xl font-bold mb-2">Resultados Finales:</h2>
-      {#each resultadosFinales as resultado}
+      {#each resultadosFinales as resultado (resultado.nodos)}
         <p>
           Red con {resultado.nodos} nodos: Promedio de saltos =
           <strong>{resultado.promedio.toFixed(2)}</strong>
@@ -139,11 +107,11 @@
     </div>
   {/if}
 
-  {#each nodos as _, index}
+  {#each nodos as n, index (n)}
     <div class="card bg-base-100 shadow-xl mb-6">
       <div class="card-body p-4">
         <div class="w-full h-96">
-          <canvas id={`chart-${index}`}></canvas>
+          <canvas bind:this={canvases[index]}></canvas>
         </div>
       </div>
     </div>
